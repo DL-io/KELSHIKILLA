@@ -1,0 +1,30 @@
+# Railway Deployment Configuration
+#
+# Prerequisites on Railway:
+#   1. Add Service → Deploy from GitHub → this repo
+#   2. Add Service → Redis   ← REQUIRED for async workers
+#   3. Add Service → MySQL   ← or use Railway managed MySQL
+#   4. Set environment variables (see .env.local template)
+#
+# Railway auto-injects:
+#   ${{MySQL.MYSQL_URL}}  → DATABASE_URL
+#   ${{Redis.REDIS_URL}}  → REDIS_URL
+
+[build]
+builder     = "nixpacks"
+buildCommand = "pnpm install --frozen-lockfile && pnpm build"
+
+[deploy]
+startCommand       = "node dist/index.js"
+healthcheckPath    = "/health"
+healthcheckTimeout = 15
+restartPolicyType  = "on_failure"
+restartPolicyMaxRetries = 10
+
+[deploy.env]
+NODE_ENV = "production"
+TZ       = "UTC"
+
+[deploy.resources]
+cpu    = 1000
+memory = 1024
