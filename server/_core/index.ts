@@ -70,6 +70,14 @@ async function startServer() {
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
+
+  // Liveness probe for Railway healthchecks (matches railway.toml healthcheckPath).
+  // Stays available even if the trading bot fails to start so the platform does not
+  // restart the container on a fail-closed env validation.
+  app.get("/health", (_req, res) => {
+    res.status(200).json({ status: "ok", time: new Date().toISOString() });
+  });
+
   registerStorageProxy(app);
   registerOAuthRoutes(app);
   // tRPC API
