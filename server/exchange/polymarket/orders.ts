@@ -35,14 +35,22 @@ export async function placePolymarketOrder(
       ? await client.createAndPostOrder(
           order,
           {
-            tickSize: ENV.polymarketDefaultTickSize,
+            tickSize: String(ENV.polymarketDefaultTickSize) as
+              | "0.1"
+              | "0.01"
+              | "0.001"
+              | "0.0001",
             negRisk: market.negRisk,
           },
           "GTC"
         )
       : await client.postOrder!(
           await client.createOrder!(order, {
-            tickSize: ENV.polymarketDefaultTickSize,
+            tickSize: String(ENV.polymarketDefaultTickSize) as
+              | "0.1"
+              | "0.01"
+              | "0.001"
+              | "0.0001",
             negRisk: market.negRisk,
           }),
           "GTC"

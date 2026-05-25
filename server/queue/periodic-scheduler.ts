@@ -18,9 +18,9 @@ import {
 } from "./index";
 
 const SCHEDULES = {
-  REFINEMENT_EVERY_MS:     6  * 60 * 60 * 1000, // 6h
-  MEMORY_EVERY_MS:         30 * 60 * 1000,        // 30min
-  ALPHA_REPORT_EVERY_MS:   24 * 60 * 60 * 1000,   // 24h
+  REFINEMENT_EVERY_MS: 6 * 60 * 60 * 1000, // 6h
+  MEMORY_EVERY_MS: 30 * 60 * 1000, // 30min
+  ALPHA_REPORT_EVERY_MS: 24 * 60 * 60 * 1000, // 24h
 } as const;
 
 export async function registerPeriodicJobs(): Promise<void> {
@@ -31,7 +31,9 @@ export async function registerPeriodicJobs(): Promise<void> {
   ];
 
   if (!refinementQ && !memoryQ && !reportingQ) {
-    console.warn("[Scheduler] Redis unavailable — periodic jobs not registered");
+    console.warn(
+      "[Scheduler] Redis unavailable — periodic jobs not registered"
+    );
     return;
   }
 

@@ -1,4 +1,4 @@
-import { getEquityHistory } from '../db';
+import { getEquityHistory } from "../db";
 
 async function generateReport() {
   const history = await getEquityHistory(24 * 30);
@@ -7,8 +7,9 @@ async function generateReport() {
     return;
   }
 
-  const pnl = history[history.length - 1].bankrollUsd - history[0].bankrollUsd;
-  const maxDrawdown = Math.max(...history.map(h => h.drawdownPct));
+  const pnl =
+    Number(history[history.length - 1].balance) - Number(history[0].balance);
+  const maxDrawdown = Math.max(...history.map(h => Number(h.drawdown)));
 
   console.info("--- PERFORMANCE REPORT (30 Days) ---");
   console.info(`Net P&L: ${pnl.toFixed(2)}`);

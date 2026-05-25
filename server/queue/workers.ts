@@ -18,12 +18,14 @@ async function getTradingHandlers() {
   return await import("../bot-engine");
 }
 async function getLearningHandlers() {
-  const { runLearningLoop } = await import("../agent/learning-loop");
-  const { feedTradeOutcomesToMemory } = await import("../agent/closed-loop-learning");
-  return { runLearningLoop, feedTradeOutcomesToMemory };
+  const { learnFromSettledTrades } = await import("../agent/learning-loop");
+  const { feedTradeOutcomesToMemory } =
+    await import("../agent/closed-loop-learning");
+  return { runLearningLoop: learnFromSettledTrades, feedTradeOutcomesToMemory };
 }
 async function getReportHandlers() {
-  const { generateAlphaReport } = await import("../intelligence/reports/alpha-reporter");
+  const { generateAlphaReport } =
+    await import("../intelligence/reports/alpha-reporter");
   return { generateAlphaReport };
 }
 
@@ -32,7 +34,7 @@ async function getReportHandlers() {
 function createTradingWorker(): Worker {
   return new Worker(
     QUEUES.TRADING,
-    async (job) => {
+    async job => {
       console.info(`[Worker:Trading] ${job.name} #${job.id}`);
 
       switch (job.name) {
@@ -66,7 +68,7 @@ function createTradingWorker(): Worker {
 function createRefinementWorker(): Worker {
   return new Worker(
     QUEUES.REFINEMENT,
-    async (job) => {
+    async job => {
       console.info(`[Worker:Refinement] ${job.name} #${job.id}`);
 
       if (job.name === "optimize-strategy") {
@@ -74,7 +76,8 @@ function createRefinementWorker(): Worker {
           const { runLearningLoop } = await getLearningHandlers();
 
           // Pull from DB — how many recent trades to analyze
-          const { getRecentTrades, getBotConfig, updateBotConfig } = await import("../db");
+          const { getRecentTrades, getBotConfig, updateBotConfig } =
+            await import("../db");
           const [trades, config] = await Promise.all([
             getRecentTrades(100),
             getBotConfig(),
@@ -83,20 +86,26 @@ function createRefinementWorker(): Worker {
           if (!config) return;
 
           const settledTrades = trades
-            .filter((t) => t.filledAt && Number(t.size) > 0)
-            .map((t) => ({
-              id: String(t.id),
-              marketId: t.marketId,
-              side: t.side as "buy" | "sell",
-              sizeUsd: Number(t.size) * Number(t.price),
-              entryPrice: Number(t.price),
-              resolvedProbability: Number(t.usdcValue) / (Number(t.size) || 1),
-              settledAt: t.filledAt ?? new Date(),
-              category: undefined,
-            }));
+            .filter(t => t.filledAt && Number(t.size) > 0)
+            .map(t => {
+              const ratio = Number(t.usdcValue) / (Number(t.size) || 1);
+              const resolved: 0 | 1 = ratio >= Number(t.price) ? 1 : 0;
+              return {
+                tradeId: String(t.id),
+                marketId: t.marketId,
+                side: t.side as "buy" | "sell",
+                sizeUsd: Number(t.size) * Number(t.price),
+                entryPrice: Number(t.price),
+                estimatedProbability: Number(t.confidenceAtTrade ?? 0.5),
+                confidence: Number(t.confidenceAtTrade ?? 0.5),
+                resolvedProbability: resolved,
+              };
+            });
 
           if (settledTrades.length < 5) {
-            console.info("[Worker:Refinement] Not enough settled trades yet (<5)");
+            console.info(
+              "[Worker:Refinement] Not enough settled trades yet (<5)"
+            );
             return;
           }
 
@@ -108,20 +117,29 @@ function createRefinementWorker(): Worker {
           });
 
           // Apply recommendations — but cap changes to safe deltas
-          const newEdge = Math.max(0.04, Math.min(0.15, signal.recommendedEdgeThreshold));
-          const newConf = Math.max(0.55, Math.min(0.90, signal.recommendedConfidenceFloor));
-          const newKelly = Math.max(0.10, Math.min(0.35, signal.recommendedKellyFraction));
+          const newEdge = Math.max(
+            0.04,
+            Math.min(0.15, signal.recommendedEdgeThreshold)
+          );
+          const newConf = Math.max(
+            0.55,
+            Math.min(0.9, signal.recommendedConfidenceFloor)
+          );
+          const newKelly = Math.max(
+            0.1,
+            Math.min(0.35, signal.recommendedKellyFraction)
+          );
 
           await updateBotConfig({
-            edgeThreshold: newEdge,
-            minConfidence: newConf,
-            kellyFraction: newKelly,
+            edgeThreshold: newEdge.toString(),
+            minConfidence: newConf.toString(),
+            kellyFraction: newKelly.toString(),
           });
 
           console.info(
             `[Worker:Refinement] Updated — edge=${newEdge.toFixed(3)} ` +
-            `conf=${newConf.toFixed(3)} kelly=${newKelly.toFixed(3)} ` +
-            `(profile: ${signal.learningProfile.regime})`
+              `conf=${newConf.toFixed(3)} kelly=${newKelly.toFixed(3)} ` +
+              `(brier=${(signal.learningProfile.brierScore ?? 0).toFixed(3)})`
           );
         } catch (err) {
           console.error("[Worker:Refinement] Failed:", err);
@@ -141,7 +159,7 @@ function createRefinementWorker(): Worker {
 function createMemoryWorker(): Worker {
   return new Worker(
     QUEUES.MEMORY,
-    async (job) => {
+    async job => {
       console.info(`[Worker:Memory] ${job.name} #${job.id}`);
 
       if (job.name === "consolidate-outcomes") {
@@ -167,7 +185,7 @@ function createMemoryWorker(): Worker {
 function createReportingWorker(): Worker {
   return new Worker(
     QUEUES.REPORTING,
-    async (job) => {
+    async job => {
       console.info(`[Worker:Reporting] ${job.name} #${job.id}`);
 
       if (job.name === "generate-alpha-feed") {
@@ -196,7 +214,7 @@ function createReportingWorker(): Worker {
 function createLifecycleWorker(): Worker {
   return new Worker(
     QUEUES.LIFECYCLE,
-    async (job) => {
+    async job => {
       console.info(`[Worker:Lifecycle] ${job.name} #${job.id}`);
       // Lifecycle polling is handled by BotEngine directly.
       // This worker processes async notifications from exchange webhooks
@@ -234,19 +252,19 @@ export function startWorkers(): void {
   ];
 
   for (const w of workers) {
-    w.on("completed", (job) =>
+    w.on("completed", job =>
       console.debug(`[Workers] ✓ ${w.name}:${job.name} #${job.id}`)
     );
     w.on("failed", (job, err) =>
       console.error(`[Workers] ✗ ${w.name}:${job?.name} — ${err.message}`)
     );
-    w.on("error", (err) =>
+    w.on("error", err =>
       console.error(`[Workers] error on ${w.name}:`, err.message)
     );
   }
 
   console.info(
     `[Workers] Started ${workers.length} workers: ` +
-      workers.map((w) => w.name).join(", ")
+      workers.map(w => w.name).join(", ")
   );
 }

@@ -62,30 +62,30 @@ export interface BotEngineConfig {
 }
 
 const DEFAULT_CONFIG: BotEngineConfig = {
-  pollingIntervalMs:          ENV.pollIntervalMs,
+  pollingIntervalMs: ENV.pollIntervalMs,
   lifecyclePollingIntervalMs: Math.min(ENV.pollIntervalMs, 10_000),
-  minVolume24h:               5_000,
-  minLiquidity:               1_000,
-  maxSpread:                  0.05,
-  orderTtlMs:                 ENV.orderTtlMs,
-  maxMarketsPerTick:          Number(process.env.MAX_MARKETS_PER_TICK ?? "5"),
-  maxOrdersPerTick:           1,
+  minVolume24h: 5_000,
+  minLiquidity: 1_000,
+  maxSpread: 0.05,
+  orderTtlMs: ENV.orderTtlMs,
+  maxMarketsPerTick: Number(process.env.MAX_MARKETS_PER_TICK ?? "5"),
+  maxOrdersPerTick: 1,
 };
 
 export class BotEngine {
-  private isRunning              = false;
-  private isPaused               = false;
+  private isRunning = false;
+  private isPaused = false;
   private emergencyBrakeTriggered = false;
-  private lifecycleLock          = false;
-  private config:                BotEngineConfig;
-  private orchestrator:          AgentOrchestrator | null = null;
-  private executionAdapter:      ExecutionAdapter  | null = null;
+  private lifecycleLock = false;
+  private config: BotEngineConfig;
+  private orchestrator: AgentOrchestrator | null = null;
+  private executionAdapter: ExecutionAdapter | null = null;
 
   // Continuous loop control — we use tail recursion + setTimeout, never setInterval.
   // This means a slow tick NEVER overlaps with the next one.
-  private _loopHandle:    NodeJS.Timeout | null = null;
-  private _lcHandle:      NodeJS.Timeout | null = null;
-  private _stopRequested  = false;
+  private _loopHandle: NodeJS.Timeout | null = null;
+  private _lcHandle: NodeJS.Timeout | null = null;
+  private _stopRequested = false;
 
   constructor(config: Partial<BotEngineConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -116,12 +116,12 @@ export class BotEngine {
     startWhaleMonitor();
 
     const portfolioProvider = new ClobPortfolioProvider();
-    const intelligence      = new LLMIntelligenceEngine();
-    const deepEdgeGate      = new ProductionDeepEdgeGate();
+    const intelligence = new LLMIntelligenceEngine();
+    const deepEdgeGate = new ProductionDeepEdgeGate();
 
     this.orchestrator = new AgentOrchestrator({
       marketProvider: new MultiExchangeMarketProvider({
-        limit:        this.config.maxMarketsPerTick * 3,
+        limit: this.config.maxMarketsPerTick * 3,
         minVolume24h: this.config.minVolume24h,
         minLiquidity: this.config.minLiquidity,
       }),
@@ -133,19 +133,19 @@ export class BotEngine {
       riskLimits: {
         ...DEFAULT_RISK_LIMITS,
         maxOrderSizeUsd: ENV.maxPositionUsd,
-        maxDrawdownPct:  ENV.maxDrawdownPct,
+        maxDrawdownPct: ENV.maxDrawdownPct,
         ...this.config.riskLimits,
       },
     });
 
-    this.isRunning              = true;
-    this.isPaused               = false;
+    this.isRunning = true;
+    this.isPaused = false;
     this.emergencyBrakeTriggered = false;
-    this._stopRequested         = false;
+    this._stopRequested = false;
 
     await updateBotConfig({
-      isRunning:               1,
-      isPaused:                0,
+      isRunning: 1,
+      isPaused: 0,
       emergencyBrakeTriggered: 0,
     });
 
@@ -166,10 +166,16 @@ export class BotEngine {
     if (!this.isRunning) return;
 
     this._stopRequested = true;
-    this.isRunning      = false;
+    this.isRunning = false;
 
-    if (this._loopHandle) { clearTimeout(this._loopHandle); this._loopHandle = null; }
-    if (this._lcHandle)   { clearTimeout(this._lcHandle);   this._lcHandle   = null; }
+    if (this._loopHandle) {
+      clearTimeout(this._loopHandle);
+      this._loopHandle = null;
+    }
+    if (this._lcHandle) {
+      clearTimeout(this._lcHandle);
+      this._lcHandle = null;
+    }
 
     await this.cancelAllOpenOrders("stop");
     await updateBotConfig({ isRunning: 0 });
@@ -183,7 +189,7 @@ export class BotEngine {
   }
 
   async resume(): Promise<void> {
-    this.isPaused                = false;
+    this.isPaused = false;
     this.emergencyBrakeTriggered = false;
     await updateBotConfig({ isPaused: 0, emergencyBrakeTriggered: 0 });
     this._scheduleNextTick(0);
@@ -192,8 +198,8 @@ export class BotEngine {
 
   getStatus() {
     return {
-      isRunning:               this.isRunning,
-      isPaused:                this.isPaused,
+      isRunning: this.isRunning,
+      isPaused: this.isPaused,
       emergencyBrakeTriggered: this.emergencyBrakeTriggered,
       executionMode:
         process.env.EXECUTION_MODE ??
@@ -204,7 +210,7 @@ export class BotEngine {
   async getHealthReport() {
     const queueHealth = await getQueueHealth();
     return {
-      bot:    this.getStatus(),
+      bot: this.getStatus(),
       queues: queueHealth,
     };
   }
@@ -226,8 +232,8 @@ export class BotEngine {
 
         console.log(
           `[Bot] Tick: scanned=${result.scannedMarkets} ` +
-          `submitted=${result.submittedOrders} ` +
-          `skipped=${result.skippedMarkets}`
+            `submitted=${result.submittedOrders} ` +
+            `skipped=${result.skippedMarkets}`
         );
 
         await this.updateEquitySnapshot();
@@ -268,17 +274,17 @@ export class BotEngine {
     if (!this.executionAdapter) return;
 
     const openOrders = await getOpenOrders();
-    const now        = new Date();
+    const now = new Date();
 
     for (const order of openOrders) {
-      const age   = now.getTime() - new Date(order.placedAt).getTime();
+      const age = now.getTime() - new Date(order.placedAt).getTime();
       const stale = age > this.config.orderTtlMs;
 
       if (stale && order.nonce) {
         try {
           await this.executionAdapter.cancel(order.nonce, now);
           await updateOrderSyncState(order.nonce, {
-            status:         "cancelled",
+            status: "cancelled",
             lifecycleState: "CANCEL_CONFIRMED",
           });
           console.log(
@@ -293,17 +299,17 @@ export class BotEngine {
       if (order.nonce) {
         try {
           const dummyMarket = {
-            marketId:           order.marketId,
-            yesTokenId:         order.tokenId,
-            noTokenId:          "",
-            question:           "",
-            bestBid:            Number(order.price),
-            bestAsk:            Number(order.price),
-            spread:             0,
-            midpoint:           Number(order.price),
-            volume24h:          0,
-            liquidity:          0,
-            expiresAt:          new Date(Date.now() + 86_400_000),
+            marketId: order.marketId,
+            yesTokenId: order.tokenId,
+            noTokenId: "",
+            question: "",
+            bestBid: Number(order.price),
+            bestAsk: Number(order.price),
+            spread: 0,
+            midpoint: Number(order.price),
+            volume24h: 0,
+            liquidity: 0,
+            expiresAt: new Date(Date.now() + 86_400_000),
             orderbookUpdatedAt: now,
           } as import("./agent/types").AgentMarket;
 
@@ -314,11 +320,15 @@ export class BotEngine {
           );
 
           const newStatus =
-            update.status === "filled"           ? "filled"
-            : update.status === "partially_filled" ? "partially_filled"
-            : update.status === "cancelled"       ? "cancelled"
-            : update.status === "expired"         ? "expired"
-            : undefined;
+            update.status === "filled"
+              ? "filled"
+              : update.status === "partially_filled"
+                ? "partially_filled"
+                : update.status === "cancelled"
+                  ? "cancelled"
+                  : update.status === "expired"
+                    ? "expired"
+                    : undefined;
 
           if (newStatus && newStatus !== order.status) {
             await updateOrderSyncState(order.nonce, { status: newStatus });
@@ -329,7 +339,7 @@ export class BotEngine {
               // Feed to memory asynchronously
               void addMemoryTask("consolidate-outcomes", {
                 triggeredBy: order.nonce,
-                at:          Date.now(),
+                at: Date.now(),
               });
             }
           }
@@ -353,28 +363,27 @@ export class BotEngine {
         getEquityHistory(24),
       ]);
 
-      const wins      = trades.filter(
+      const wins = trades.filter(
         t => Number(t.usdcValue) > Number(t.price) * Number(t.size)
       );
-      const winRate24h =
-        trades.length > 0 ? wins.length / trades.length : 0.5;
+      const winRate24h = trades.length > 0 ? wins.length / trades.length : 0.5;
 
-      const first       = equity[0];
-      const last        = equity[equity.length - 1];
+      const first = equity[0];
+      const last = equity[equity.length - 1];
       const dailyPnlUsd =
         first && last ? Number(last.balance) - Number(first.balance) : 0;
 
       const baseRiskLimits: RiskLimits = {
         ...DEFAULT_RISK_LIMITS,
         maxOrderSizeUsd: ENV.maxPositionUsd,
-        maxDrawdownPct:  ENV.maxDrawdownPct,
+        maxDrawdownPct: ENV.maxDrawdownPct,
         ...(this.config.riskLimits ?? {}),
       };
 
       const adapted = calculateAdaptiveLimits(baseRiskLimits, {
         winRate24h,
-        avgSpread24h:    0.04,
-        tradeCount24h:   trades.length,
+        avgSpread24h: 0.04,
+        tradeCount24h: trades.length,
         dailyPnlUsd,
       });
 
@@ -390,8 +399,8 @@ export class BotEngine {
       if (Math.random() < 0.02) {
         void addRefinementTask("optimize-strategy", {
           triggeredBy: "tick",
-          tradeCount:  trades.length,
-          winRate:     winRate24h,
+          tradeCount: trades.length,
+          winRate: winRate24h,
         });
       }
     } catch {
@@ -402,24 +411,25 @@ export class BotEngine {
   // ─── Equity Snapshot + Emergency Brake ──────────────────────────────────
 
   private async updateEquitySnapshot(): Promise<void> {
-    const portfolio   = await getExchangePortfolioState(new Date());
-    const balance     = portfolio.snapshot.bankrollUsd;
+    const portfolio = await getExchangePortfolioState(new Date());
+    const balance = portfolio.snapshot.bankrollUsd;
     const peakBalance = portfolio.snapshot.peakBankrollUsd;
-    const drawdown    =
+    const drawdown =
       peakBalance > 0 ? ((peakBalance - balance) / peakBalance) * 100 : 0;
     const totalExposure =
       balance > 0 ? (portfolio.snapshot.openExposureUsd / balance) * 100 : 0;
 
     await insertEquitySnapshot({
-      balance:        balance.toString(),
-      peakBalance:    Math.max(balance, peakBalance).toString(),
-      drawdown:       drawdown.toString(),
-      totalExposure:  totalExposure.toString(),
+      balance: balance.toString(),
+      peakBalance: Math.max(balance, peakBalance).toString(),
+      drawdown: drawdown.toString(),
+      totalExposure: totalExposure.toString(),
     });
 
-    const maxDrawdown = ENV.maxDrawdownPct > 0
-      ? ENV.maxDrawdownPct
-      : (this.config.riskLimits?.maxDrawdownPct ?? 15);
+    const maxDrawdown =
+      ENV.maxDrawdownPct > 0
+        ? ENV.maxDrawdownPct
+        : (this.config.riskLimits?.maxDrawdownPct ?? 15);
 
     if (drawdown >= maxDrawdown && !this.emergencyBrakeTriggered) {
       await this.triggerEmergencyBrake(drawdown);
@@ -445,7 +455,7 @@ export class BotEngine {
 
     try {
       await notifyOwner({
-        title:   "POLY-SHORE: Emergency brake triggered",
+        title: "POLY-SHORE: Emergency brake triggered",
         content: `Bot paused. Drawdown reached ${drawdownPct.toFixed(2)}%. All open orders cancelled. Resume from dashboard.`,
       });
     } catch {
@@ -461,40 +471,37 @@ export class BotEngine {
     if (!this.executionAdapter) return;
 
     const portfolio = await getExchangePortfolioState(now);
-    if (
-      portfolio.snapshot.reconciliationStatus !== "ok" ||
-      !portfolio.exchange
-    ) return;
+    if (portfolio.snapshot.reconciliationStatus !== "ok" || !portfolio.exchange)
+      return;
 
-    const openOrders    = await getOpenOrders();
-    const openSellMkts  = new Set(
-      openOrders
-        .filter(o => o.side === "sell")
-        .map(o => o.marketId)
+    const openOrders = await getOpenOrders();
+    const openSellMkts = new Set(
+      openOrders.filter(o => o.side === "sell").map(o => o.marketId)
     );
 
     for (const position of portfolio.exchange.positions) {
-      if (position.currentValueUsd <= 0)         continue;
-      if (openSellMkts.has(position.marketId))   continue;
+      if (position.currentValueUsd <= 0) continue;
+      if (openSellMkts.has(position.marketId)) continue;
 
       const marketRow = await getMarketByMarketId(position.marketId);
       if (!marketRow?.bestBid || !marketRow.expiresAt) continue;
 
       const market = {
-        marketId:           marketRow.marketId,
-        question:           marketRow.question,
-        yesTokenId:         position.tokenId,
-        noTokenId:          "",
-        bestBid:            Number(marketRow.bestBid),
-        bestAsk:            Number(marketRow.bestAsk ?? marketRow.bestBid),
-        spread:             Number(marketRow.spread ?? 0),
+        marketId: marketRow.marketId,
+        question: marketRow.question,
+        yesTokenId: position.tokenId,
+        noTokenId: "",
+        bestBid: Number(marketRow.bestBid),
+        bestAsk: Number(marketRow.bestAsk ?? marketRow.bestBid),
+        spread: Number(marketRow.spread ?? 0),
         midpoint:
           Number(marketRow.bestBid ?? 0) +
           (Number(marketRow.bestAsk ?? marketRow.bestBid) -
-           Number(marketRow.bestBid ?? 0)) / 2,
-        volume24h:          Number(marketRow.volume24h ?? 0),
-        liquidity:          Number(marketRow.volume24h ?? 0),
-        expiresAt:          new Date(marketRow.expiresAt ?? now),
+            Number(marketRow.bestBid ?? 0)) /
+            2,
+        volume24h: Number(marketRow.volume24h ?? 0),
+        liquidity: Number(marketRow.volume24h ?? 0),
+        expiresAt: new Date(marketRow.expiresAt ?? now),
         orderbookUpdatedAt: new Date(
           marketRow.lastUpdatedAt ?? marketRow.createdAt ?? now
         ),
@@ -513,7 +520,11 @@ export class BotEngine {
         trades: tradeHistory
           .slice()
           .reverse()
-          .map(t => ({ side: t.side, price: Number(t.price), size: Number(t.size) })),
+          .map(t => ({
+            side: t.side,
+            price: Number(t.price),
+            size: Number(t.size),
+          })),
         now,
       });
 
@@ -532,7 +543,10 @@ export class BotEngine {
         }
         return; // One exit per lifecycle poll
       } catch (err) {
-        console.warn(`[Bot] Velocity exit failed for ${position.marketId}:`, err);
+        console.warn(
+          `[Bot] Velocity exit failed for ${position.marketId}:`,
+          err
+        );
       }
     }
   }
@@ -546,11 +560,14 @@ export class BotEngine {
       try {
         await this.executionAdapter.cancel(order.nonce, new Date());
         await updateOrderSyncState(order.nonce, {
-          status:         "cancelled",
+          status: "cancelled",
           lifecycleState: "CANCEL_CONFIRMED",
         });
       } catch (err) {
-        console.warn(`[Bot] Cancel (${reason}) failed for ${order.nonce}:`, err);
+        console.warn(
+          `[Bot] Cancel (${reason}) failed for ${order.nonce}:`,
+          err
+        );
       }
     }
   }
@@ -571,8 +588,8 @@ export class BotEngine {
 
     if (recovery.status !== "ok") {
       await updateBotConfig({
-        isRunning:               0,
-        isPaused:                1,
+        isRunning: 0,
+        isPaused: 1,
         emergencyBrakeTriggered: 1,
       });
       throw new Error(
@@ -589,34 +606,38 @@ export class BotEngine {
   ): Promise<void> {
     const { getKalshiCashBalance } = await import("./exchange/kalshi");
 
-    let pmBankroll:     number        = 0;
+    let pmBankroll: number = 0;
     let kalshiBankroll: number | null = null;
 
     try {
-      const snap    = await portfolioProvider.snapshot();
-      pmBankroll    = snap.bankrollUsd;
-    } catch { /* unavailable at startup */ }
+      const snap = await portfolioProvider.snapshot();
+      pmBankroll = snap.bankrollUsd;
+    } catch {
+      /* unavailable at startup */
+    }
 
     try {
       kalshiBankroll = await getKalshiCashBalance();
-    } catch { /* Kalshi unavailable */ }
+    } catch {
+      /* Kalshi unavailable */
+    }
 
-    const hasRedis = !!(ENV.redisUrl);
+    const hasRedis = !!ENV.redisUrl;
     const line = (label: string, value: string) =>
       `║ ${(label + ":").padEnd(30)} ${value.padEnd(25)} ║`;
 
     console.log(`
 ╔══════════════════════════════════════════════════════════════╗
 ║ POLY-SHORE — Autonomous Market Intelligence Engine           ║
-${line("Mode",                    mode.toUpperCase())}
-${line("Polymarket killswitch",   ENV.polymarketKillswitchArmed ? "ARMED  🔴" : "DISARMED 🟢")}
-${line("Kalshi killswitch",       ENV.kalshiKillswitchArmed     ? "ARMED  🔴" : "DISARMED 🟢")}
-${line("Polymarket balance",      `$${pmBankroll.toFixed(2)} USDC`)}
-${line("Kalshi balance",          kalshiBankroll !== null ? `$${kalshiBankroll.toFixed(2)} USD` : "unavailable")}
-${line("Max position",            `$${ENV.maxPositionUsd.toFixed(2)}`)}
-${line("Max drawdown",            `${ENV.maxDrawdownPct.toFixed(1)}%`)}
-${line("Tick interval",           `${this.config.pollingIntervalMs / 1000}s`)}
-${line("Async workers (Redis)",   hasRedis ? "ENABLED ✓" : "DISABLED (no REDIS_URL)")}
+${line("Mode", mode.toUpperCase())}
+${line("Polymarket killswitch", ENV.polymarketKillswitchArmed ? "ARMED  🔴" : "DISARMED 🟢")}
+${line("Kalshi killswitch", ENV.kalshiKillswitchArmed ? "ARMED  🔴" : "DISARMED 🟢")}
+${line("Polymarket balance", `$${pmBankroll.toFixed(2)} USDC`)}
+${line("Kalshi balance", kalshiBankroll !== null ? `$${kalshiBankroll.toFixed(2)} USD` : "unavailable")}
+${line("Max position", `$${ENV.maxPositionUsd.toFixed(2)}`)}
+${line("Max drawdown", `${ENV.maxDrawdownPct.toFixed(1)}%`)}
+${line("Tick interval", `${this.config.pollingIntervalMs / 1000}s`)}
+${line("Async workers (Redis)", hasRedis ? "ENABLED ✓" : "DISABLED (no REDIS_URL)")}
 ╚══════════════════════════════════════════════════════════════╝`);
   }
 
@@ -625,12 +646,13 @@ ${line("Async workers (Redis)",   hasRedis ? "ENABLED ✓" : "DISABLED (no REDIS
   private async runBacktestMode(): Promise<void> {
     const dataPath = process.env.BACKTEST_DATA_PATH;
     if (!dataPath) {
-      throw new Error("BACKTEST_DATA_PATH required when EXECUTION_MODE=backtest");
+      throw new Error(
+        "BACKTEST_DATA_PATH required when EXECUTION_MODE=backtest"
+      );
     }
 
-    const { BacktestingEngine, loadHistoricalFramesFromFile } = await import(
-      "./backtesting/engine"
-    );
+    const { BacktestingEngine, loadHistoricalFramesFromFile } =
+      await import("./backtesting/engine");
     const { generateBacktestReport } = await import("./backtesting/reporter");
 
     const frames = await loadHistoricalFramesFromFile(dataPath);
@@ -640,9 +662,9 @@ ${line("Async workers (Redis)",   hasRedis ? "ENABLED ✓" : "DISABLED (no REDIS
 
     console.log(
       `[Backtest] frames=${result.framesProcessed} ` +
-      `trades=${report.summary.trades} ` +
-      `pnl=$${report.summary.realizedPnlUsd.toFixed(2)} ` +
-      `maxDD=${report.maxDrawdownPct.toFixed(2)}%`
+        `trades=${report.summary.trades} ` +
+        `pnl=$${report.summary.realizedPnlUsd.toFixed(2)} ` +
+        `maxDD=${report.maxDrawdownPct.toFixed(2)}%`
     );
   }
 }

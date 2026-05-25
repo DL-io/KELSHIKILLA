@@ -33,13 +33,17 @@ export interface SimilarHistoricalEvent extends HistoricalEventEmbedding {
 function cosineSimilarity(a: number[], b: number[]): number {
   const len = Math.min(a.length, b.length);
   if (len === 0) return 0;
-  let dot = 0, aNorm = 0, bNorm = 0;
+  let dot = 0,
+    aNorm = 0,
+    bNorm = 0;
   for (let i = 0; i < len; i++) {
-    dot   += a[i] * b[i];
+    dot += a[i] * b[i];
     aNorm += a[i] * a[i];
     bNorm += b[i] * b[i];
   }
-  return aNorm === 0 || bNorm === 0 ? 0 : dot / (Math.sqrt(aNorm) * Math.sqrt(bNorm));
+  return aNorm === 0 || bNorm === 0
+    ? 0
+    : dot / (Math.sqrt(aNorm) * Math.sqrt(bNorm));
 }
 
 // ─── Embedding Builder ───────────────────────────────────────────────────────
@@ -83,14 +87,14 @@ CREATE TABLE IF NOT EXISTS vector_memory (
 `.trim();
 
 interface VectorMemoryRow {
-  event_id:           string;
-  summary:            string;
-  embedding:          string;
-  anomaly_type:       string;
-  market_maker:       string | null;
+  event_id: string;
+  summary: string;
+  embedding: string;
+  anomaly_type: string;
+  market_maker: string | null;
   resolution_pattern: string | null;
-  outcome:            "causal" | "coincidental" | "unknown";
-  pnl_usd:            string | null;
+  outcome: "causal" | "coincidental" | "unknown";
+  pnl_usd: string | null;
 }
 
 export class DbVectorMemoryStore {
@@ -104,7 +108,10 @@ export class DbVectorMemoryStore {
       await db.execute(sql.raw(CREATE_TABLE_SQL));
       this.migrated = true;
     } catch (err) {
-      console.warn("[VectorMemory] Table creation error (may already exist):", err);
+      console.warn(
+        "[VectorMemory] Table creation error (may already exist):",
+        err
+      );
       this.migrated = true; // Don't retry on every call
     }
   }
@@ -141,13 +148,17 @@ export class DbVectorMemoryStore {
 
   async searchByEmbedding(
     embedding: number[],
-    options: { topK?: number; anomalyType?: string; minSimilarity?: number } = {}
+    options: {
+      topK?: number;
+      anomalyType?: string;
+      minSimilarity?: number;
+    } = {}
   ): Promise<SimilarHistoricalEvent[]> {
     await this.ensureTable();
     const db = await getDb();
     if (!db) return [];
 
-    const topK          = options.topK          ?? 5;
+    const topK = options.topK ?? 5;
     const minSimilarity = options.minSimilarity ?? 0.3;
 
     // Fetch candidates (filter by anomalyType in DB to reduce in-process work)
@@ -157,22 +168,28 @@ export class DbVectorMemoryStore {
         : sql`SELECT * FROM vector_memory ORDER BY updated_at DESC LIMIT 2000`
     );
 
-    const rawRows = (Array.isArray(rows) ? rows[0] : rows) as unknown as VectorMemoryRow[];
+    const rawRows = (Array.isArray(rows)
+      ? rows[0]
+      : rows) as unknown as VectorMemoryRow[];
 
     return rawRows
       .map((row): SimilarHistoricalEvent => {
         let rowEmbedding: number[] = [];
-        try { rowEmbedding = JSON.parse(row.embedding) as number[]; } catch { /* skip */ }
+        try {
+          rowEmbedding = JSON.parse(row.embedding) as number[];
+        } catch {
+          /* skip */
+        }
         return {
-          eventId:           row.event_id,
-          summary:           row.summary,
-          embedding:         rowEmbedding,
-          anomalyType:       row.anomaly_type,
-          marketMaker:       row.market_maker ?? undefined,
+          eventId: row.event_id,
+          summary: row.summary,
+          embedding: rowEmbedding,
+          anomalyType: row.anomaly_type,
+          marketMaker: row.market_maker ?? undefined,
           resolutionPattern: row.resolution_pattern ?? undefined,
-          outcome:           row.outcome,
-          pnlUsd:            row.pnl_usd != null ? Number(row.pnl_usd) : undefined,
-          similarity:        cosineSimilarity(embedding, rowEmbedding),
+          outcome: row.outcome,
+          pnlUsd: row.pnl_usd != null ? Number(row.pnl_usd) : undefined,
+          similarity: cosineSimilarity(embedding, rowEmbedding),
         };
       })
       .filter(e => e.similarity >= minSimilarity)
@@ -181,7 +198,11 @@ export class DbVectorMemoryStore {
   }
 
   /** Stats for dashboard / health checks */
-  async getStats(): Promise<{ total: number; causal: number; coincidental: number }> {
+  async getStats(): Promise<{
+    total: number;
+    causal: number;
+    coincidental: number;
+  }> {
     await this.ensureTable();
     const db = await getDb();
     if (!db) return { total: 0, causal: 0, coincidental: 0 };
@@ -190,13 +211,18 @@ export class DbVectorMemoryStore {
       const rows = await db.execute(
         sql`SELECT outcome, COUNT(*) as cnt FROM vector_memory GROUP BY outcome`
       );
-      const rawRows = (Array.isArray(rows) ? rows[0] : rows) as { outcome: string; cnt: string }[];
-      const byOutcome = Object.fromEntries(rawRows.map(r => [r.outcome, Number(r.cnt)]));
+      const rawRows = (Array.isArray(rows) ? rows[0] : rows) as unknown as {
+        outcome: string;
+        cnt: string;
+      }[];
+      const byOutcome = Object.fromEntries(
+        rawRows.map(r => [r.outcome, Number(r.cnt)])
+      );
       const total = rawRows.reduce((s, r) => s + Number(r.cnt), 0);
       return {
         total,
-        causal:        byOutcome["causal"]       ?? 0,
-        coincidental:  byOutcome["coincidental"] ?? 0,
+        causal: byOutcome["causal"] ?? 0,
+        coincidental: byOutcome["coincidental"] ?? 0,
       };
     } catch {
       return { total: 0, causal: 0, coincidental: 0 };
@@ -211,6 +237,9 @@ export function getVectorStore(): DbVectorMemoryStore {
   return (_store ??= new DbVectorMemoryStore());
 }
 
+// Canonical interface name used by callers (deep-edge-gate etc.)
+export type VectorMemoryStore = DbVectorMemoryStore;
+
 // ─── In-Memory fallback (for tests) ─────────────────────────────────────────
 
 export class InMemoryVectorMemoryStore {
@@ -222,8 +251,13 @@ export class InMemoryVectorMemoryStore {
   ): Promise<SimilarHistoricalEvent[]> {
     const topK = options.topK ?? 5;
     return this.events
-      .filter(e => !options.anomalyType || e.anomalyType === options.anomalyType)
-      .map(e => ({ ...e, similarity: cosineSimilarity(embedding, e.embedding) }))
+      .filter(
+        e => !options.anomalyType || e.anomalyType === options.anomalyType
+      )
+      .map(e => ({
+        ...e,
+        similarity: cosineSimilarity(embedding, e.embedding),
+      }))
       .sort((a, b) => b.similarity - a.similarity)
       .slice(0, topK);
   }

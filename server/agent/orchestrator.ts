@@ -363,9 +363,8 @@ export class AgentOrchestrator {
     now: Date
   ): Promise<DeepEdgeDecision> {
     try {
-      const { getWhaleTradesForMarket } = await import(
-        "../intelligence/whale-monitor"
-      );
+      const { getWhaleTradesForMarket } =
+        await import("../intelligence/whale-monitor");
       return this.deepEdgeGate.evaluate(
         market,
         ensemble,

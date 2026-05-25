@@ -54,8 +54,8 @@ interface TrackedOrder {
 function hasDirectL2Credentials(): boolean {
   return Boolean(
     ENV.polymarketApiKey &&
-      ENV.polymarketApiSecret &&
-      ENV.polymarketApiPassphrase
+    ENV.polymarketApiSecret &&
+    ENV.polymarketApiPassphrase
   );
 }
 
