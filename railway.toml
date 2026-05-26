@@ -1,29 +1,43 @@
-# Railway Deployment Configuration
+# Railway Deployment Configuration — Paper-Trading Mode
 #
 # Prerequisites on Railway:
 #   1. Add Service → Deploy from GitHub → this repo
-#   2. Add Service → Redis   ← REQUIRED for async workers
-#   3. Add Service → MySQL   ← or use Railway managed MySQL
-#   4. Set environment variables (see .env.local template)
+#   2. Add Service → Redis   ← REQUIRED for BullMQ workers
+#   3. Add Service → MySQL   ← REQUIRED for operational state
+#   4. Set environment variables (see RAILWAY.md and RAILWAY_ENV_VARS.md)
 #
-# Railway auto-injects:
-#   ${{MySQL.MYSQL_URL}}  → DATABASE_URL
-#   ${{Redis.REDIS_URL}}  → REDIS_URL
+# Wire Railway service references for connection strings:
+#   DATABASE_URL = ${{MySQL.MYSQL_URL}}
+#   REDIS_URL    = ${{Redis.REDIS_URL}}
+#
+# Build steps are defined in nixpacks.toml so install/build are explicit.
 
 [build]
-builder     = "nixpacks"
-buildCommand = "pnpm install --frozen-lockfile && pnpm build"
+builder = "nixpacks"
 
 [deploy]
-startCommand       = "node dist/index.js"
-healthcheckPath    = "/health"
-healthcheckTimeout = 15
-restartPolicyType  = "on_failure"
+# Canonical runtime: server/_core/index.ts → express + tRPC + BotEngine
+# (BullMQ workers in server/queue/workers.ts, websocket-first ingestion).
+# Do not replace with a polling-only loop.
+startCommand            = "node dist/index.js"
+healthcheckPath         = "/health"
+healthcheckTimeout      = 30
+restartPolicyType       = "on_failure"
 restartPolicyMaxRetries = 10
+# BullMQ workers are stateful — keep a single replica so periodic jobs and
+# lifecycle reconciliation do not double-fire.
+numReplicas             = 1
 
 [deploy.env]
-NODE_ENV = "production"
-TZ       = "UTC"
+# Non-secret defaults. Paper mode and live-trading gate are explicit and
+# fail-closed: real exchange keys must be set in the Railway dashboard.
+NODE_ENV                = "production"
+TZ                      = "UTC"
+EXECUTION_MODE          = "paper"
+LIVE_TRADING_ENABLED    = "false"
+KILLSWITCH_ARMED        = "false"
+KALSHI_EXECUTION_MODE   = "paper"
+KALSHI_KILLSWITCH_ARMED = "false"
 
 [deploy.resources]
 cpu    = 1000

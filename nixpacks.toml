@@ -1,0 +1,18 @@
+# Nixpacks build configuration for Railway (paper-trading mode)
+#
+# Pins Node.js + pnpm and drives an explicit install → build pipeline so
+# Railway does not auto-detect a different package manager.
+# Start command is defined in railway.toml so it stays in one place.
+
+[phases.setup]
+nixPkgs = ["nodejs_20", "pnpm-9_x"]
+
+[phases.install]
+cmds = ["pnpm install --frozen-lockfile"]
+
+[phases.build]
+cmds = ["pnpm build"]
+
+[variables]
+NODE_ENV = "production"
+NPM_CONFIG_PRODUCTION = "false"
