@@ -310,10 +310,10 @@ function buildProviderChain(model?: string): Provider[] {
 }
 
 /**
- * Returns a cloud-preferred provider chain for Stage 2 probability estimation
- * when LLM_PROVIDER_STRATEGY=hybrid. Tries OpenAI/Anthropic first, then Groq.
+ * Cloud-only provider chain for stages that must not fall back to local Ollama
+ * (e.g. probability estimation). Order: OpenAI → Anthropic → Groq.
  */
-export function buildCloudProviderChain(): Provider[] {
+function buildCloudProviderChain(): Provider[] {
   const chain: Provider[] = [];
   if (ENV.openaiApiKey) {
     chain.push({ type: "oai", url: "https://api.openai.com/v1/chat/completions", key: ENV.openaiApiKey, name: `openai/${ENV.openaiModel}` });
@@ -548,20 +548,29 @@ const normalizeResponseFormat = ({
   };
 };
 
+export interface InvokeOptions {
+  /** When true, restrict to OpenAI → Anthropic → Groq (no local Ollama). */
+  preferCloud?: boolean;
+}
+
 /**
- * Invoke the LLM with automatic fallback.
+ * Invoke the LLM with automatic fallback. Single canonical entry point.
  *
  * @param params  Standard invoke params
  * @param model   Override model (e.g. LLM_EXTRACTOR_MODEL or LLM_PRIMARY_MODEL).
  *                Defaults to ENV.llmPrimaryModel for Ollama; provider default for others.
+ * @param options Routing options. `preferCloud` selects the cloud-only chain.
  */
 export async function invokeLLM(
   params: InvokeParams,
-  model?: string
+  model?: string,
+  options: InvokeOptions = {}
 ): Promise<InvokeResult> {
   assertApiKey();
 
-  const chain = buildProviderChain(model);
+  const cloudChain = options.preferCloud ? buildCloudProviderChain() : [];
+  const chain =
+    cloudChain.length > 0 ? cloudChain : buildProviderChain(model);
   const resolvedModel = model ?? ENV.llmPrimaryModel;
 
   let lastError: Error | undefined;
@@ -597,38 +606,4 @@ export async function invokeLLM(
 
   activeProvider = "failed";
   throw lastError ?? new Error("All LLM providers failed");
-}
-
-/**
- * Invoke LLM using an explicit provider chain (for hybrid mode Stage 2).
- * Falls back to the standard chain if the given chain is empty.
- */
-export async function invokeLLMWithChain(
-  chain: ReturnType<typeof buildCloudProviderChain>,
-  params: InvokeParams,
-  model?: string
-): Promise<InvokeResult> {
-  const resolvedChain = chain.length > 0 ? chain : buildProviderChain(model);
-  const resolvedModel = model ?? ENV.llmPrimaryModel;
-  let lastError: Error | undefined;
-  const t0 = Date.now();
-
-  for (const provider of resolvedChain) {
-    try {
-      const result =
-        provider.type === "ollama"
-          ? await callOllama(provider as OllamaProvider, params, resolvedModel)
-          : await callOAI(provider as OAIProvider, params, resolvedModel);
-      activeProvider = provider.name;
-      activeProviderLatencyMs = Date.now() - t0;
-      return result;
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err));
-      const status = (err as { status?: number }).status ?? 0;
-      if (!isRetryable(status) && status !== 0) throw lastError;
-      console.warn(`[LLM] Chain provider ${provider.name} failed, trying next: ${lastError.message.slice(0, 80)}`);
-    }
-  }
-
-  throw lastError ?? new Error("All LLM chain providers failed");
 }

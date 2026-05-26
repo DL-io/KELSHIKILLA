@@ -92,29 +92,3 @@ export function hasKalshiCredentials(): boolean {
     (ENV.kalshiPrivateKeyPem || ENV.kalshiPrivateKeyPath)
   );
 }
-
-// ─── Legacy compat stubs (kept so existing imports don't break) ───────────────
-
-/** @deprecated Use buildKalshiAuthHeaders instead */
-export interface KalshiAuthConfig {
-  email?: string;
-  password?: string;
-  baseUrl?: string;
-}
-
-/** @deprecated No longer used; RSA-PSS signing replaces token auth */
-export interface KalshiTokenState {
-  token: string;
-  expiresAt?: Date;
-}
-
-/** @deprecated No longer used; auth is stateless RSA-PSS per-request */
-export class KalshiAuthManager {
-  constructor(_config: KalshiAuthConfig = {}) {}
-  async getToken(_forceRefresh = false): Promise<string> {
-    throw new KalshiConfigurationError(
-      "KalshiAuthManager.getToken() is deprecated. Use buildKalshiAuthHeaders() for RSA-PSS auth."
-    );
-  }
-  clear(): void {}
-}

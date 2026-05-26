@@ -1,8 +1,4 @@
-import {
-  invokeLLM,
-  invokeLLMWithChain,
-  buildCloudProviderChain,
-} from "../_core/llm";
+import { invokeLLM } from "../_core/llm";
 import { buildLessonsLearned } from "./closed-loop-learning";
 import { ENV } from "../_core/env";
 import {
@@ -221,12 +217,9 @@ async function estimateProbability(
 ): Promise<ProbabilityEstimationResult> {
   const t0 = Date.now();
 
-  // Create an explicit chain for the estimate: Primary -> Secondary -> Fallback (API + Ollama)
-  // This allows the engine to be truly provider-agnostic.
-  const chain = buildCloudProviderChain();
-
-  const result = await invokeLLMWithChain(
-    chain,
+  // Stage 2 probability estimation is cloud-only by design — local Ollama is
+  // permitted for factor extraction but must not author probability estimates.
+  const result = await invokeLLM(
     {
       messages: [
         {
@@ -273,7 +266,8 @@ async function estimateProbability(
         strict: true,
       },
     },
-    model
+    model,
+    { preferCloud: true }
   );
 
   const text =
