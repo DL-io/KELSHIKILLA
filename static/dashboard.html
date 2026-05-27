@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>KELSHIKILLA — Live Monitor</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0b0f14;
+    --panel: #131923;
+    --line: #1e2733;
+    --text: #d9e2ec;
+    --muted: #8aa0b6;
+    --ok: #38d9a9;
+    --warn: #ffb454;
+    --err: #ff6b6b;
+    --accent: #4dabf7;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--text);
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 13px;
+  }
+  header {
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--line);
+    display: flex; justify-content: space-between; align-items: center;
+    flex-wrap: wrap; gap: 8px;
+  }
+  header h1 {
+    margin: 0; font-size: 14px; letter-spacing: 0.06em;
+  }
+  .badge {
+    padding: 2px 8px; border-radius: 4px;
+    background: var(--line); color: var(--muted); font-size: 11px;
+  }
+  .badge.ok    { background: rgba(56,217,169,0.15); color: var(--ok); }
+  .badge.warn  { background: rgba(255,180,84,0.15); color: var(--warn); }
+  .badge.err   { background: rgba(255,107,107,0.15); color: var(--err); }
+  main {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+    gap: 12px; padding: 12px;
+  }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    padding: 12px; overflow: hidden;
+  }
+  .panel h2 {
+    margin: 0 0 8px 0; font-size: 12px; color: var(--muted);
+    letter-spacing: 0.08em; text-transform: uppercase;
+  }
+  table {
+    width: 100%; border-collapse: collapse; font-size: 12px;
+  }
+  th, td {
+    text-align: left; padding: 4px 6px;
+    border-bottom: 1px solid var(--line);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    max-width: 180px;
+  }
+  th { color: var(--muted); font-weight: 500; }
+  .kv { display: grid; grid-template-columns: 160px 1fr; gap: 4px 12px; }
+  .kv .k { color: var(--muted); }
+  .scroll { max-height: 320px; overflow-y: auto; }
+  .num { color: var(--accent); }
+  .pos { color: var(--ok); }
+  .neg { color: var(--err); }
+  footer {
+    padding: 8px 18px; color: var(--muted); font-size: 11px;
+    border-top: 1px solid var(--line);
+  }
+  .row-actions { display: flex; gap: 8px; }
+  .err-text { color: var(--err); }
+</style>
+</head>
+<body>
+<header>
+  <h1>KELSHIKILLA · LIVE MONITOR</h1>
+  <div class="row-actions">
+    <span id="mode-badge" class="badge">mode: …</span>
+    <span id="bot-badge" class="badge">bot: …</span>
+    <span id="redis-badge" class="badge">redis: …</span>
+    <span id="updated" class="badge">updated: —</span>
+  </div>
+</header>
+
+<main>
+  <section class="panel" id="panel-telemetry">
+    <h2>Telemetry</h2>
+    <div class="kv" id="telemetry"></div>
+    <div id="telemetry-issues" class="err-text" style="margin-top:8px"></div>
+  </section>
+
+  <section class="panel" id="panel-portfolio">
+    <h2>Portfolio</h2>
+    <div class="kv" id="portfolio"></div>
+  </section>
+
+  <section class="panel" id="panel-orders">
+    <h2>Open Orders</h2>
+    <div class="scroll">
+      <table id="open-orders">
+        <thead><tr>
+          <th>nonce</th><th>market</th><th>side</th><th>price</th>
+          <th>size</th><th>status</th><th>placed</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel" id="panel-trades">
+    <h2>Recent Trades</h2>
+    <div class="scroll">
+      <table id="trades">
+        <thead><tr>
+          <th>filled</th><th>market</th><th>side</th><th>price</th>
+          <th>size</th><th>usd</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel" id="panel-signals">
+    <h2>Signals</h2>
+    <div class="scroll">
+      <table id="signals">
+        <thead><tr>
+          <th>collected</th><th>market</th><th>source</th>
+          <th>sent</th><th>conf</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel" id="panel-decisions">
+    <h2>Recent Decisions</h2>
+    <div class="scroll">
+      <table id="decisions">
+        <thead><tr>
+          <th>time</th><th>market</th><th>action</th>
+          <th>edge</th><th>conf</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<footer>
+  Polls every 5s · Endpoints: /api/portfolio · /api/orders · /api/trades · /api/signals · /api/telemetry · /health · /ready
+</footer>
+
+<script>
+function fmt(v) {
+  if (v === null || v === undefined) return '—';
+  if (typeof v === 'number') {
+    if (Math.abs(v) >= 1000) return v.toFixed(0);
+    return v.toFixed(4).replace(/\.?0+$/, '');
+  }
+  return String(v);
+}
+function num(v) { const n = Number(v); return Number.isFinite(n) ? n : null; }
+function ago(ts) {
+  if (!ts) return '—';
+  const t = new Date(ts).getTime();
+  const s = Math.max(0, (Date.now() - t) / 1000);
+  if (s < 60) return s.toFixed(0) + 's';
+  if (s < 3600) return (s/60).toFixed(0) + 'm';
+  return (s/3600).toFixed(1) + 'h';
+}
+function setKV(id, pairs) {
+  const el = document.getElementById(id);
+  el.innerHTML = '';
+  for (const [k, v] of pairs) {
+    const a = document.createElement('div'); a.className = 'k'; a.textContent = k;
+    const b = document.createElement('div'); b.textContent = v;
+    el.appendChild(a); el.appendChild(b);
+  }
+}
+function setBadge(id, label, cls) {
+  const el = document.getElementById(id);
+  el.textContent = label;
+  el.className = 'badge ' + cls;
+}
+function tbody(id) {
+  return document.querySelector('#' + id + ' tbody');
+}
+function row(tb, cells) {
+  const tr = document.createElement('tr');
+  for (const c of cells) {
+    const td = document.createElement('td'); td.textContent = c == null ? '—' : c;
+    tr.appendChild(td);
+  }
+  tb.appendChild(tr);
+}
+
+async function getJson(url) {
+  const r = await fetch(url, { cache: 'no-store' });
+  if (!r.ok) throw new Error(url + ' → HTTP ' + r.status);
+  return r.json();
+}
+
+async function refresh() {
+  const updated = new Date().toLocaleTimeString();
+  document.getElementById('updated').textContent = 'updated: ' + updated;
+
+  const results = await Promise.allSettled([
+    getJson('/api/telemetry'),
+    getJson('/api/portfolio'),
+    getJson('/api/orders?limit=50'),
+    getJson('/api/trades?limit=50'),
+    getJson('/api/signals?limit=50&audits=30'),
+  ]);
+
+  // ── Telemetry ─────────────────────────────────────────────────────────
+  if (results[0].status === 'fulfilled') {
+    const t = results[0].value;
+    setBadge('mode-badge', 'mode: ' + (t.executionMode || '?'),
+      t.executionMode === 'live' ? 'warn' : 'ok');
+    const bot = t.bot || {};
+    setBadge('bot-badge',
+      bot.isRunning ? (bot.isPaused ? 'bot: paused' : 'bot: running') : 'bot: stopped',
+      bot.emergencyBrakeTriggered ? 'err'
+        : bot.isRunning && !bot.isPaused ? 'ok' : 'warn');
+    setBadge('redis-badge', 'redis: ' + (t.queues?.redis ? 'up' : 'down'),
+      t.queues?.redis ? 'ok' : 'warn');
+
+    const op = t.operational || {};
+    setKV('telemetry', [
+      ['running', String(!!bot.isRunning)],
+      ['paused', String(!!bot.isPaused)],
+      ['emergency', String(!!bot.emergencyBrakeTriggered)],
+      ['open orders', op.openOrderCount ?? '—'],
+      ['stale orders', op.staleOpenOrderCount ?? '—'],
+      ['recent trades', op.recentTradeCount ?? '—'],
+      ['workers', (t.workers || []).join(', ') || 'none'],
+      ['ready', op.ok ? 'yes' : 'no'],
+    ]);
+    document.getElementById('telemetry-issues').textContent =
+      (op.issues || []).join(' · ');
+  } else {
+    setBadge('bot-badge', 'bot: ?', 'err');
+    document.getElementById('telemetry-issues').textContent =
+      results[0].reason?.message || 'telemetry failed';
+  }
+
+  // ── Portfolio ─────────────────────────────────────────────────────────
+  if (results[1].status === 'fulfilled') {
+    const p = results[1].value;
+    const eq = p.latestEquity || {};
+    const snap = p.portfolio?.snapshot || {};
+    setKV('portfolio', [
+      ['bankroll', fmt(num(eq.balance))],
+      ['peak', fmt(num(eq.peakBalance))],
+      ['drawdown %', fmt(num(eq.drawdown))],
+      ['exposure %', fmt(num(eq.totalExposure))],
+      ['daily pnl', fmt(snap.dailyPnlUsd)],
+      ['open orders', fmt(snap.openOrderCount)],
+      ['eq history pts', String(p.equityHistory?.length || 0)],
+    ]);
+  }
+
+  // ── Open Orders ───────────────────────────────────────────────────────
+  if (results[2].status === 'fulfilled') {
+    const tb = tbody('open-orders'); tb.innerHTML = '';
+    for (const o of results[2].value.open || []) {
+      row(tb, [
+        o.nonce?.slice(0,10), o.marketId?.slice(0,18), o.side,
+        fmt(num(o.price)), fmt(num(o.size)), o.status,
+        ago(o.placedAt),
+      ]);
+    }
+  }
+
+  // ── Trades ────────────────────────────────────────────────────────────
+  if (results[3].status === 'fulfilled') {
+    const tb = tbody('trades'); tb.innerHTML = '';
+    for (const t of results[3].value.trades || []) {
+      row(tb, [
+        ago(t.filledAt), t.marketId?.slice(0,18), t.side,
+        fmt(num(t.price)), fmt(num(t.size)), fmt(num(t.usdcValue)),
+      ]);
+    }
+  }
+
+  // ── Signals + Decisions ───────────────────────────────────────────────
+  if (results[4].status === 'fulfilled') {
+    const sig = tbody('signals'); sig.innerHTML = '';
+    for (const s of results[4].value.signals || []) {
+      row(sig, [
+        ago(s.collectedAt), s.marketId?.slice(0,18), s.source,
+        fmt(num(s.sentimentScore)), fmt(num(s.confidence)),
+      ]);
+    }
+    const dec = tbody('decisions'); dec.innerHTML = '';
+    for (const d of results[4].value.decisionAudits || []) {
+      row(dec, [
+        ago(d.createdAt), d.marketId?.slice(0,18), d.action,
+        fmt(num(d.edge)), fmt(num(d.confidence)),
+      ]);
+    }
+  }
+}
+
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>

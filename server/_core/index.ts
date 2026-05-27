@@ -14,6 +14,7 @@ import { printStartupBanner } from "./startup-banner";
 import { getQueueHealth } from "../queue";
 import { stopWorkers } from "../queue/workers";
 import { collectOperationalHealthSnapshot } from "../monitoring/operational-health";
+import { registerRestApi } from "../api-rest";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -137,6 +138,10 @@ async function startServer() {
       createContext,
     })
   );
+  // Lightweight REST observability API + static /dashboard. Must be registered
+  // BEFORE setupVite/serveStatic so the SPA wildcard handler does not shadow
+  // the JSON endpoints.
+  registerRestApi(app);
   // development mode uses Vite, production mode uses static files
   if (process.env.NODE_ENV === "development") {
     await setupVite(app, server);

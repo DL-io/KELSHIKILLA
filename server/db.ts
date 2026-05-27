@@ -184,6 +184,16 @@ export async function getRecentSignals(
     .orderBy(desc(signals.collectedAt));
 }
 
+export async function getLatestSignals(limit: number = 50) {
+  const db = await getDb();
+  if (!db) return [];
+  return db
+    .select()
+    .from(signals)
+    .orderBy(desc(signals.collectedAt))
+    .limit(limit);
+}
+
 /**
  * Orders
  */
