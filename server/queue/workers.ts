@@ -230,6 +230,7 @@ function createLifecycleWorker(): Worker {
 // ─── Start All Workers ───────────────────────────────────────────────────────
 
 let _started = false;
+let _workers: Worker[] = [];
 
 export function startWorkers(): void {
   if (_started) return;
@@ -243,7 +244,7 @@ export function startWorkers(): void {
 
   _started = true;
 
-  const workers = [
+  _workers = [
     createTradingWorker(),
     createRefinementWorker(),
     createMemoryWorker(),
@@ -251,7 +252,7 @@ export function startWorkers(): void {
     createLifecycleWorker(),
   ];
 
-  for (const w of workers) {
+  for (const w of _workers) {
     w.on("completed", job =>
       console.debug(`[Workers] ✓ ${w.name}:${job.name} #${job.id}`)
     );
@@ -264,7 +265,26 @@ export function startWorkers(): void {
   }
 
   console.info(
-    `[Workers] Started ${workers.length} workers: ` +
-      workers.map(w => w.name).join(", ")
+    `[Workers] Started ${_workers.length} workers: ` +
+      _workers.map(w => w.name).join(", ")
   );
+}
+
+export function getRunningWorkerNames(): string[] {
+  return _workers.map(w => w.name);
+}
+
+export async function stopWorkers(): Promise<void> {
+  if (!_started) return;
+  const closing = _workers.map(async w => {
+    try {
+      await w.close();
+    } catch (err) {
+      console.error(`[Workers] Failed to close ${w.name}:`, err);
+    }
+  });
+  await Promise.all(closing);
+  _workers = [];
+  _started = false;
+  console.info("[Workers] All workers closed");
 }

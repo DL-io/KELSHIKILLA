@@ -1,7 +1,7 @@
 import "dotenv/config";
 import express from "express";
 import { BotEngine } from "../bot-engine";
-import { registerBot } from "./bot-singleton";
+import { registerBot, getBot } from "./bot-singleton";
 import { createServer } from "http";
 import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
@@ -11,6 +11,9 @@ import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { printStartupBanner } from "./startup-banner";
+import { getQueueHealth } from "../queue";
+import { stopWorkers } from "../queue/workers";
+import { collectOperationalHealthSnapshot } from "../monitoring/operational-health";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -35,7 +38,11 @@ async function runMigrations() {
   if (!process.env.DATABASE_URL) return;
   try {
     const { createConnection } = await import("mysql2/promise");
-    const conn = await createConnection({ uri: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false }, connectTimeout: 15000 });
+    const conn = await createConnection({
+      uri: process.env.DATABASE_URL,
+      ssl: { rejectUnauthorized: false },
+      connectTimeout: 15000,
+    });
     const tables = [
       `CREATE TABLE IF NOT EXISTS \`users\` (\`id\` int AUTO_INCREMENT NOT NULL,\`openId\` varchar(64) NOT NULL,\`name\` text,\`email\` varchar(320),\`loginMethod\` varchar(64),\`role\` enum('user','admin') NOT NULL DEFAULT 'user',\`createdAt\` timestamp NOT NULL DEFAULT (now()),\`updatedAt\` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,\`lastSignedIn\` timestamp NOT NULL DEFAULT (now()),CONSTRAINT \`users_id\` PRIMARY KEY(\`id\`),CONSTRAINT \`users_openId_unique\` UNIQUE(\`openId\`))`,
       `CREATE TABLE IF NOT EXISTS \`bayesian_priors\` (\`id\` int AUTO_INCREMENT NOT NULL,\`category\` varchar(100) NOT NULL,\`priorProbability\` decimal(3,2) NOT NULL,\`sampleSize\` int NOT NULL DEFAULT 0,\`updatedAt\` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,CONSTRAINT \`bayesian_priors_id\` PRIMARY KEY(\`id\`),CONSTRAINT \`bayesian_priors_category_unique\` UNIQUE(\`category\`))`,
@@ -78,6 +85,48 @@ async function startServer() {
     res.status(200).json({ status: "ok", time: new Date().toISOString() });
   });
 
+  // Readiness probe — surfaces real bot + queue + DB state without auth.
+  // Distinct from /health (liveness): /ready returns non-200 if the bot
+  // is not running, in emergency brake, or queues are unreachable.
+  // Does NOT block deployment, but lets PM2/Railway/operators distinguish
+  // "process alive" from "ready to take work".
+  app.get("/ready", async (_req, res) => {
+    try {
+      const bot = getBot();
+      const botStatus = bot?.getStatus();
+      const [queueHealth, snapshot] = await Promise.all([
+        getQueueHealth(),
+        collectOperationalHealthSnapshot().catch(() => null),
+      ]);
+      const ready =
+        !!botStatus &&
+        botStatus.isRunning &&
+        !botStatus.emergencyBrakeTriggered &&
+        (snapshot ? snapshot.staleOpenOrderCount === 0 : true);
+      res.status(ready ? 200 : 503).json({
+        ready,
+        time: new Date().toISOString(),
+        bot: botStatus ?? null,
+        queues: queueHealth,
+        operational: snapshot
+          ? {
+              ok: snapshot.ok,
+              issues: snapshot.issues,
+              openOrderCount: snapshot.openOrderCount,
+              staleOpenOrderCount: snapshot.staleOpenOrderCount,
+              recentTradeCount: snapshot.recentTradeCount,
+            }
+          : null,
+      });
+    } catch (err) {
+      res.status(503).json({
+        ready: false,
+        error: (err as Error).message,
+        time: new Date().toISOString(),
+      });
+    }
+  });
+
   registerStorageProxy(app);
   registerOAuthRoutes(app);
   // tRPC API
@@ -110,6 +159,53 @@ async function startServer() {
   const bot = new BotEngine();
   registerBot(bot);
   bot.start().catch(e => console.error("[Bot] Auto-start failed:", e));
+
+  registerGracefulShutdown(server, bot);
+}
+
+// Graceful shutdown: on SIGTERM/SIGINT, stop accepting new HTTP, stop the bot
+// (cancels open orders), and close BullMQ workers. Railway/PM2 send SIGTERM
+// before SIGKILL; this avoids leaving orders, queue connections, or repeating
+// jobs in an undefined state on redeploy.
+function registerGracefulShutdown(
+  server: ReturnType<typeof createServer>,
+  bot: BotEngine
+): void {
+  let shuttingDown = false;
+  const handle = (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.info(`[Shutdown] Received ${signal} — beginning graceful stop`);
+    const deadlineMs = 25000;
+    const killTimer = setTimeout(() => {
+      console.error(
+        `[Shutdown] Forced exit after ${deadlineMs}ms — workers/bot did not stop in time`
+      );
+      process.exit(1);
+    }, deadlineMs);
+    killTimer.unref();
+
+    Promise.resolve()
+      .then(() => new Promise<void>(r => server.close(() => r())))
+      .then(() =>
+        bot.stop().catch(e => console.error("[Shutdown] bot.stop:", e))
+      )
+      .then(() =>
+        stopWorkers().catch(e => console.error("[Shutdown] stopWorkers:", e))
+      )
+      .then(() => {
+        clearTimeout(killTimer);
+        console.info("[Shutdown] Clean exit");
+        process.exit(0);
+      })
+      .catch(err => {
+        clearTimeout(killTimer);
+        console.error("[Shutdown] Error during shutdown:", err);
+        process.exit(1);
+      });
+  };
+  process.once("SIGTERM", () => handle("SIGTERM"));
+  process.once("SIGINT", () => handle("SIGINT"));
 }
 
 startServer().catch(console.error);
